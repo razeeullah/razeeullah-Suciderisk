@@ -1,6 +1,5 @@
-# Ignore large files (too big for GitHub)
+# Ignore large dataset (too big for GitHub)
 Suicide_Detection.csv
-*.pkl
 
 # Python
 __pycache__/
