@@ -1,5 +1,6 @@
 """
 ML-Based Suicide Risk Analyzer - Streamlit Application
+Version: 1.0.1 (Standalone ML)
 
 Uses the trained machine learning model for suicide risk detection.
 """
