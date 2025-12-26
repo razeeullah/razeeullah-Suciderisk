@@ -48,21 +48,39 @@ st.markdown("""
 
 
 @st.cache_resource
-def load_model():
-    """Load the trained ML model and vectorizer."""
+def load_models():
+    """Load all trained ML models and vectorizers."""
+    models = {}
     try:
-        model_path = os.path.join(SCRIPT_DIR, 'suicide_detection_model.pkl')
-        vectorizer_path = os.path.join(SCRIPT_DIR, 'tfidf_vectorizer.pkl')
-        
-        if not os.path.exists(model_path):
-            return None, None
+        # Suicide Model
+        s_model_path = os.path.join(SCRIPT_DIR, 'suicide_detection_model.pkl')
+        s_vec_path = os.path.join(SCRIPT_DIR, 'tfidf_vectorizer.pkl')
+        if os.path.exists(s_model_path):
+            models['suicide'] = joblib.load(s_model_path)
+            models['suicide_vec'] = joblib.load(s_vec_path)
             
-        model = joblib.load(model_path)
-        vectorizer = joblib.load(vectorizer_path)
-        
-        return model, vectorizer
+        # Multi-Condition Model
+        m_model_path = os.path.join(SCRIPT_DIR, 'multi_condition_model.pkl')
+        m_vec_path = os.path.join(SCRIPT_DIR, 'multi_tfidf.pkl')
+        if os.path.exists(m_model_path):
+            models['multi'] = joblib.load(m_model_path)
+            models['multi_vec'] = joblib.load(m_vec_path)
+            
+        return models
     except Exception as e:
+        return models
+
+
+def predict_condition(text, models):
+    """Predict mental health condition using ML."""
+    if 'multi' not in models:
         return None, None
+    cleaned = preprocess_text(text)
+    vec = models['multi_vec'].transform([cleaned])
+    prediction = models['multi'].predict(vec)[0]
+    probs = models['multi'].predict_proba(vec)[0]
+    conf = max(probs)
+    return prediction, conf
 
 
 def preprocess_text(text):
@@ -138,37 +156,56 @@ def main():
     if 'assistant' not in st.session_state:
         st.session_state.assistant = DiagnosticAssistant()
     
-    model, vectorizer = load_model()
+    models = load_models()
     static_factors = sidebar_onboarding()
     display_crisis_resources()
     
     st.markdown('<div class="crisis-banner">🆘 CRISIS SUPPORT: Call 988 (US) or local emergency - 24/7</div>', unsafe_allow_html=True)
     st.title("🧠 Clinical Mental Health Assistant")
     
-    tab_ml, tab_dsm, tab_data = st.tabs(["🎯 Suicide Risk (ML)", "📋 Diagnostics (DSM-5)", "📊 Data Insights"])
+    tab_ml, tab_multi, tab_dsm, tab_data = st.tabs([
+        "🎯 Suicide Risk (ML)", 
+        "🧠 Condition Prediction (ML)", 
+        "📋 Diagnostics (DSM-5)", 
+        "📊 Data Insights"
+    ])
     
     with tab_ml:
-        if model is None:
-            st.warning("Model files not found. Please train the model in the 'train_model.py' script.")
-            st.info("The app will proceed with DSM-5 Diagnostics and Data Insights only.")
+        if 'suicide' not in models:
+            st.warning("Suicide model files not found. Please train 'train_model.py'.")
         else:
             st.markdown("### 🎯 ML Suicide Risk Detection")
-            st.markdown("This section uses a Logistic Regression model trained on 1M+ samples.")
-            input_text = st.text_area("Analyze text for suicide risk:", height=150, key="ml_input", placeholder="Type or paste text here...")
-            if st.button("🔍 Run ML Analysis", type="primary"):
-                if not input_text.strip():
-                    st.warning("Please enter some text to analyze.")
-                    return
-                with st.spinner("Analyzing risk..."):
-                    risk, conf, is_high = predict_risk(input_text, model, vectorizer)
-                    st.markdown("---")
-                    if is_high:
-                        st.error(f"🚨 {risk}")
-                        st.metric("Model Confidence", f"{conf*100:.1f}%")
-                        st.warning("⚠️ High Risk detected. Please utilize the crisis resources in the sidebar.")
-                    else:
-                        st.success(f"✓ {risk}")
-                        st.metric("Model Confidence", f"{conf*100:.1f}%")
+            st.markdown("Binary classification: Suicide Risk vs. Low Risk.")
+            input_text = st.text_area("Analyze text for suicide risk:", height=150, key="ml_input")
+            if st.button("🔍 Run Suicide Analysis", type="primary"):
+                if not input_text.strip(): st.warning("Please enter text."); return
+                risk, conf, is_high = predict_risk(input_text, models['suicide'], models['suicide_vec'])
+                if is_high:
+                    st.error(f"🚨 {risk}")
+                    st.metric("Confidence", f"{conf*100:.1f}%")
+                else:
+                    st.success(f"✓ {risk}")
+                    st.metric("Confidence", f"{conf*100:.1f}%")
+
+    with tab_multi:
+        if 'multi' not in models:
+            st.warning("Multi-condition model not found. Please train 'train_multi_model.py'.")
+        else:
+            st.markdown("### 🧠 ML Clinical Condition Prediction")
+            st.markdown("Predicts specific DSM-labeled conditions using the new multi-class model.")
+            multi_input = st.text_area("Enter text for condition prediction:", height=150, key="multi_input", placeholder="e.g., I've been feeling extremely worried about everything lately...")
+            if st.button("🔮 Predict Condition"):
+                if not multi_input.strip(): st.warning("Please enter text."); return
+                condition, conf = predict_condition(multi_input, models)
+                st.markdown("---")
+                if condition == "None/General":
+                    st.info(f"💡 Prediction: **{condition}**")
+                else:
+                    st.success(f"🩺 Predicted Condition: **{condition}**")
+                st.metric("Model Confidence", f"{conf*100:.1f}%")
+                
+                if conf < 0.4:
+                    st.warning("⚠️ Low confidence prediction. Results may be inaccurate.")
 
     with tab_dsm:
         st.markdown("### 📋 DSM-5 Multi-Disorder Diagnostics")
