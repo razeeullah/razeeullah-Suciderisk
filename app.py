@@ -1,307 +1,361 @@
 """
-ML-Based Suicide Risk Analyzer - Streamlit Application
+Clinical Sentiment Analyst - Streamlit Web Application
 
-Uses the trained machine learning model for suicide risk detection.
+A web-based tool for analyzing text for anxiety markers and suicidal ideation
+with built-in safety protocols and crisis intervention features.
+
+⚠️ IMPORTANT: This tool is for analytical support only and does not replace
+professional clinical judgment.
 """
 
 import streamlit as st
-import joblib
-import os
-from datetime import datetime
-import re
+from clinical_analyzer import ClinicalAnalyzer
+from safety_override import SafetyOverride, get_emergency_banner
+import json
 
-# Get script directory
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Crisis resources
-CRISIS_RESOURCES = {
-    "988": "988 Suicide & Crisis Lifeline",
-    "crisis_text": "Text HOME to 741741",
-    "emergency": "911 for immediate emergencies"
-}
-
-# Page config
+# Page configuration
 st.set_page_config(
-    page_title="Suicide Risk Analyzer",
+    page_title="Clinical Sentiment Analyst",
     page_icon="💙",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# CSS
+# Custom CSS for calming design
 st.markdown("""
 <style>
+    .main {
+        background-color: #f0f4f8;
+    }
+    .stTextArea textarea {
+        font-size: 16px;
+        border-radius: 10px;
+    }
     .crisis-banner {
         background-color: #ff4444;
         color: white;
-        padding: 20px;
+        padding: 15px;
         border-radius: 10px;
         text-align: center;
         font-weight: bold;
-        font-size: 20px;
+        font-size: 18px;
         margin-bottom: 20px;
     }
-    .risk-high {
-        color: #dc3545;
-        font-weight: bold;
-        font-size: 24px;
+    .disclaimer {
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 20px 0;
+    }
+    .report-section {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .risk-low {
         color: #28a745;
         font-weight: bold;
     }
+    .risk-moderate {
+        color: #fd7e14;
+        font-weight: bold;
+    }
+    .risk-high {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    .risk-imminent {
+        color: #dc3545;
+        font-weight: bold;
+        font-size: 24px;
+        animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def load_model():
-    """Load the trained ML model and vectorizer."""
-    try:
-        model_path = os.path.join(SCRIPT_DIR, 'suicide_detection_model.pkl')
-        vectorizer_path = os.path.join(SCRIPT_DIR, 'tfidf_vectorizer.pkl')
-        
-        model = joblib.load(model_path)
-        vectorizer = joblib.load(vectorizer_path)
-        
-        return model, vectorizer
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        st.info("Please train the model first by running: `python train_model.py`")
-        return None, None
+def initialize_session_state():
+    """Initialize session state variables."""
+    if 'analyzer' not in st.session_state:
+        st.session_state.analyzer = ClinicalAnalyzer()
+    if 'safety' not in st.session_state:
+        st.session_state.safety = SafetyOverride()
+    if 'analysis_complete' not in st.session_state:
+        st.session_state.analysis_complete = False
+    if 'current_result' not in st.session_state:
+        st.session_state.current_result = None
 
 
-def preprocess_text(text):
-    """Clean text for analysis."""
-    if not text:
-        return ""
+def display_emergency_banner():
+    """Display persistent emergency resource banner."""
+    st.markdown("""
+    <div class="crisis-banner">
+        🆘 CRISIS SUPPORT AVAILABLE 24/7: Call 988 (US) or your local emergency number
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def display_disclaimers():
+    """Display medical and legal disclaimers."""
+    disclaimers = st.session_state.safety.get_disclaimers()
     
-    text = str(text).lower()
-    text = re.sub(r'http\S+|www\S+', '', text)
-    text = re.sub(r'[^a-zA-Z0-9\s.,!?\'" -]', '', text)
-    text = ' '.join(text.split())
-    
-    return text
+    with st.expander("⚠️ Important Disclaimers - Please Read"):
+        st.markdown(f"""
+        <div class="disclaimer">
+            <h4>🏥 Professional Judgment Required</h4>
+            <p>{disclaimers['primary']}</p>
+            
+            <h4>🚨 Emergency Protocol</h4>
+            <p>{disclaimers['emergency']}</p>
+            
+            <h4>🔒 Privacy Notice</h4>
+            <p>{disclaimers['privacy']}</p>
+            
+            <h4>👨‍⚕️ Seek Professional Help</h4>
+            <p>{disclaimers['professional_help']}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
-def predict_risk(text, model, vectorizer):
-    """Predict suicide risk."""
-    cleaned = preprocess_text(text)
-    text_tfidf = vectorizer.transform([cleaned])
-    
-    prediction = model.predict(text_tfidf)[0]
-    probabilities = model.predict_proba(text_tfidf)[0]
-    
-    if prediction == 1:
-        risk = "SUICIDE RISK DETECTED"
-        confidence = probabilities[1]
-        is_high_risk = True
-    else:
-        risk = "Low Risk"
-        confidence = probabilities[0]
-        is_high_risk = False
-    
-    return risk, confidence, is_high_risk
-
-
-def display_crisis_resources():
-    """Display crisis resources."""
+def display_crisis_resources(region="united_states"):
+    """Display crisis resources in sidebar."""
     st.sidebar.title("🆘 Crisis Resources")
-    st.sidebar.markdown("""
-    ### 📞 988 Suicide & Crisis Lifeline
-    **Call or Text: 988**
     
-    Available 24/7 - Free and confidential
+    resources = st.session_state.safety.get_crisis_resources(region)
     
-    ---
+    if region == "united_states":
+        primary = resources["primary_hotline"]
+        st.sidebar.markdown(f"""
+        ### 📞 {primary['name']}
+        **Call: {primary['number']}**
+        
+        {primary['available']}
+        
+        {primary['description']}
+        """)
+        
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### Additional Resources")
+        
+        for hotline in resources["alternative_hotlines"]:
+            with st.sidebar.expander(hotline['name']):
+                if 'number' in hotline:
+                    st.write(f"**Call:** {hotline['number']}")
+                if 'text' in hotline:
+                    st.write(f"**Text:** {hotline['text']}")
+                st.write(hotline['description'])
+        
+        st.sidebar.markdown("---")
+        emergency = resources["emergency"]
+        st.sidebar.error(f"🚑 **Emergency: {emergency['number']}**\n\n{emergency['description']}")
+
+
+def get_risk_css_class(risk_level):
+    """Get CSS class for risk level."""
+    return f"risk-{risk_level.lower()}"
+
+
+def display_analysis_result(result, override_triggered, emergency_msg):
+    """Display analysis results with appropriate formatting."""
     
-    ### 💬 Crisis Text Line
-    **Text HOME to 741741**
-    
-    ---
-    
-    ### 🚑 Emergency
-    **Call 911**
-    
-    For immediate life-threatening emergencies
-    
-    ---
-    
-    ### 🌐 International Resources
-    Visit: [findahelpline.com](https://findahelpline.com)
-    """)
+    if override_triggered:
+        # SAFETY OVERRIDE: Display emergency message prominently
+        st.error("# 🚨 IMMEDIATE SUPPORT NEEDED 🚨")
+        st.markdown(f"""
+        <div style="background-color: #ff4444; color: white; padding: 30px; 
+                    border-radius: 10px; font-size: 18px; line-height: 1.8;">
+        {emergency_msg.replace('\n', '<br>')}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.warning("📋 **Analysis suppressed due to safety protocols. Crisis resources prioritized.**")
+        
+    else:
+        # Display full analysis for Low/Moderate risk
+        st.markdown(f"""
+        <div class="report-section">
+            <h2>Analysis Results</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Risk level
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            risk_class = get_risk_css_class(result.risk_level)
+            st.markdown(f"""
+            <div class="report-section">
+                <h3>Risk Level</h3>
+                <p class="{risk_class}">{result.risk_level.upper()}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="report-section">
+                <h3>Confidence</h3>
+                <p><strong>{result.confidence * 100:.1f}%</strong></p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Primary emotions
+        st.markdown(f"""
+        <div class="report-section">
+            <h3>Primary Emotions Detected</h3>
+            <p>{', '.join(result.primary_emotions)}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Key phrases
+        if result.key_phrases:
+            st.markdown("""
+            <div class="report-section">
+                <h3>Key Phrases Identified</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            for i, phrase in enumerate(result.key_phrases, 1):
+                st.markdown(f"{i}. {phrase}")
+        
+        # Detailed scores
+        st.markdown("""
+        <div class="report-section">
+            <h3>Detailed Analysis Scores</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        score_cols = st.columns(3)
+        score_items = list(result.detailed_scores.items())
+        
+        for idx, (category, score) in enumerate(score_items):
+            with score_cols[idx % 3]:
+                display_name = category.replace('_', ' ').title()
+                st.metric(display_name, f"{score:.2f}")
+        
+        # Recommended action
+        action_color = "#dc3545" if result.risk_level in ["High", "Imminent"] else "#fd7e14" if result.risk_level == "Moderate" else "#28a745"
+        
+        st.markdown(f"""
+        <div class="report-section" style="border-left: 5px solid {action_color};">
+            <h3>Recommended Action</h3>
+            <p style="font-size: 16px;">{result.recommended_action}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Show crisis resources for Moderate/High
+        if result.risk_level in ["Moderate", "High"]:
+            st.warning("💙 **Crisis resources are available in the sidebar. Please review them.**")
 
 
 def main():
-    # Load model
-    model, vectorizer = load_model()
+    """Main application function."""
     
-    if model is None or vectorizer is None:
-        st.stop()
+    # Initialize
+    initialize_session_state()
     
-    # Emergency banner
-    st.markdown("""
-    <div class="crisis-banner">
-        🆘 CRISIS SUPPORT: Call 988 (US) or your local emergency number - Available 24/7
-    </div>
-    """, unsafe_allow_html=True)
+    # Display emergency banner
+    display_emergency_banner()
     
     # Title
-    st.title("💙 ML-Based Suicide Risk Analyzer")
+    st.title("💙 Clinical Sentiment Analyst")
     st.markdown("""
-    This tool uses machine learning trained on 100,000 samples to detect suicide risk in text.
-    
-    **Model Performance:**
-    - 93% Accuracy
-    - 94% Precision  
-    - 92% Recall
+    This tool analyzes text for markers of anxiety and suicidal ideation using 
+    clinical psychology frameworks including the Columbia Scale.
     """)
     
-    # Display sidebar resources
-    display_crisis_resources()
+    # Display disclaimers
+    display_disclaimers()
     
-    # Disclaimer
-    with st.expander("⚠️ Important Disclaimer"):
-        st.warning("""
-        **This tool is for analytical support only and does NOT replace professional judgment.**
-        
-        - This is not a medical diagnosis
-        - Always consult licensed mental health professionals
-        - If someone is in immediate danger, call 911 or go to the nearest emergency room
-        - Crisis support is available 24/7 at 988
-        """)
+    # Display crisis resources in sidebar
+    region = st.sidebar.selectbox(
+        "Select Region for Crisis Resources",
+        ["united_states", "international"],
+        index=0
+    )
+    display_crisis_resources(region)
     
-    # Main input
+    # Main input area
     st.markdown("---")
-    st.markdown("### 📝 Enter Text to Analyze")
+    st.markdown("### 📝 Enter Text for Analysis")
     
     input_text = st.text_area(
-        "Paste or type text:",
+        "Paste or type the text you want to analyze:",
         height=200,
-        placeholder="Enter text here for analysis..."
+        placeholder="Enter text here for sentiment and risk analysis..."
     )
     
-    col1, col2 = st.columns([1, 3])
+    col1, col2, col3 = st.columns([1, 1, 2])
     
     with col1:
-        analyze_btn = st.button("🔍 Analyze", type="primary", use_container_width=True)
+        analyze_button = st.button("🔍 Analyze Text", type="primary", use_container_width=True)
     
     with col2:
-        clear_btn = st.button("🗑️ Clear", use_container_width=True)
+        clear_button = st.button("🗑️ Clear", use_container_width=True)
     
-    if clear_btn:
+    if clear_button:
+        st.session_state.analysis_complete = False
+        st.session_state.current_result = None
         st.rerun()
     
-    # Analysis
-    if analyze_btn:
+    # Perform analysis
+    if analyze_button:
         if not input_text.strip():
             st.warning("⚠️ Please enter some text to analyze.")
         else:
-            with st.spinner("Analyzing..."):
-                risk, confidence, is_high_risk = predict_risk(input_text, model, vectorizer)
+            with st.spinner("Analyzing text..."):
+                # Run analysis
+                result = st.session_state.analyzer.analyze(input_text)
                 
-                st.markdown("---")
-                
-                if is_high_risk:
-                    # HIGH RISK - Show crisis resources first
-                    st.error("# 🚨 SUICIDE RISK DETECTED 🚨")
-                    
-                    st.markdown("""
-                    <div style="background-color: #ff4444; color: white; padding: 30px; 
-                                border-radius: 10px; font-size: 18px; line-height: 2;">
-                        <h2 style="color: white;">⚠️ IMMEDIATE SUPPORT AVAILABLE</h2>
-                        
-                        <p><strong>🔴 Call 988 - Suicide & Crisis Lifeline</strong><br>
-                        Available 24/7 - Free and confidential</p>
-                        
-                        <p><strong>💬 Text HOME to 741741</strong><br>
-                        Crisis Text Line</p>
-                        
-                        <p><strong>🚑 Emergency: Call 911</strong><br>
-                        For immediate life-threatening situations</p>
-                        
-                        <hr style="border-color: white;">
-                        
-                        <p style="font-size: 24px;">💙 You are not alone. Help is available right now.</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown("---")
-                    
-                    # Show prediction details
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Risk Level", risk, delta=None)
-                    with col2:
-                        st.metric("Model Confidence", f"{confidence*100:.1f}%")
-                    
-                    st.warning("""
-                    **Recommended Action:**
-                    - Do not leave the person alone
-                    - Encourage immediate professional contact
-                    - Call 988 or visit nearest emergency room
-                    - Remove access to lethal means if possible
-                    """)
-                    
-                else:
-                    # LOW RISK - Normal display
-                    st.success("### Analysis Complete")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f'<p class="risk-low">✓ {risk}</p>', unsafe_allow_html=True)
-                    with col2:
-                        st.metric("Confidence", f"{confidence*100:.1f}%")
-                    
-                    st.info("""
-                    **Recommendation:**
-                    - Standard support and monitoring
-                    - Encourage self-care and wellness
-                    - Crisis resources available if needed (see sidebar)
-                    """)
-                
-                # Save results option
-                st.markdown("---")
-                
-                report = f"""
-SUICIDE RISK ANALYSIS REPORT
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-RISK LEVEL: {risk}
-CONFIDENCE: {confidence*100:.1f}%
-
-MODEL INFORMATION:
-- Algorithm: Logistic Regression with TF-IDF
-- Training Dataset: 100,000 samples
-- Accuracy: 93%
-- Precision: 94%
-- Recall: 92%
-
-INPUT TEXT:
-{input_text}
-
-DISCLAIMER:
-This is an automated analysis and NOT a medical diagnosis.
-Always consult with licensed mental health professionals.
-
-CRISIS RESOURCES:
-- 988 Suicide & Crisis Lifeline (Call or text 988)
-- Crisis Text Line (Text HOME to 741741)
-- Emergency Services (Call 911)
-"""
-                
-                st.download_button(
-                    "📥 Download Report",
-                    data=report,
-                    file_name=f"risk_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
+                # Check safety override
+                override_triggered, emergency_msg, processed_result = st.session_state.safety.create_safety_report(
+                    result.risk_level,
+                    {
+                        "risk_level": result.risk_level,
+                        "primary_emotions": result.primary_emotions,
+                        "key_phrases": result.key_phrases,
+                        "recommended_action": result.recommended_action,
+                        "detailed_scores": result.detailed_scores,
+                        "confidence": result.confidence
+                    },
+                    region
                 )
+                
+                # Store results
+                st.session_state.analysis_complete = True
+                st.session_state.current_result = (result, override_triggered, emergency_msg)
+    
+    # Display results
+    if st.session_state.analysis_complete and st.session_state.current_result:
+        st.markdown("---")
+        result, override_triggered, emergency_msg = st.session_state.current_result
+        display_analysis_result(result, override_triggered, emergency_msg)
+        
+        # Download report option (for non-override cases)
+        if not override_triggered:
+            st.markdown("---")
+            report_text = st.session_state.analyzer.format_report(result)
+            st.download_button(
+                label="📥 Download Analysis Report",
+                data=report_text,
+                file_name=f"clinical_analysis_{result.timestamp.replace(':', '-')}.txt",
+                mime="text/plain"
+            )
     
     # Footer
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #6c757d; font-size: 14px;">
-        <p>💙 This tool supports, never replaces, human judgment and compassion.</p>
-        <p>Model trained on Suicide_Detection.csv dataset (1M+ samples)</p>
+        <p>This tool is designed to support, not replace, clinical judgment.</p>
+        <p>Always consult with licensed mental health professionals for proper evaluation.</p>
+        <p>💙 If you're in crisis, help is available right now.</p>
     </div>
     """, unsafe_allow_html=True)
 
