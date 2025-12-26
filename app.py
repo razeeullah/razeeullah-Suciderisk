@@ -1,30 +1,27 @@
 """
-ML-Based Suicide Risk Analyzer - Streamlit Application
-Version: 1.0.1 (Standalone ML)
+Unified Clinical Mental Health Assistant
+Version: 2.0.0 (Unified ML & DSM-5)
 
-Uses the trained machine learning model for suicide risk detection.
+Combines ML-based suicide risk detection with DSM-5 diagnostic analysis.
 """
 
 import streamlit as st
 import joblib
 import os
+import pandas as pd
+import plotly.express as px
 from datetime import datetime
 import re
+import json
+from diagnostic_engine import DiagnosticAssistant
 
 # Get script directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Crisis resources
-CRISIS_RESOURCES = {
-    "988": "988 Suicide & Crisis Lifeline",
-    "crisis_text": "Text HOME to 741741",
-    "emergency": "911 for immediate emergencies"
-}
-
 # Page config
 st.set_page_config(
-    page_title="Suicide Risk Analyzer",
-    page_icon="💙",
+    page_title="Clinical Mental Health Assistant",
+    page_icon="🧠",
     layout="wide"
 )
 
@@ -32,24 +29,20 @@ st.set_page_config(
 st.markdown("""
 <style>
     .crisis-banner {
-        background-color: #ff4444;
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        font-weight: bold;
-        font-size: 20px;
-        margin-bottom: 20px;
+        background-color: #ff4444; color: white; padding: 20px;
+        border-radius: 10px; text-align: center; font-weight: bold;
+        font-size: 20px; margin-bottom: 20px;
     }
-    .risk-high {
-        color: #dc3545;
-        font-weight: bold;
-        font-size: 24px;
+    .report-section {
+        background-color: #f8f9fa; padding: 20px; border-radius: 10px;
+        margin: 10px 0; border-left: 5px solid #007bff;
     }
-    .risk-low {
-        color: #28a745;
-        font-weight: bold;
-    }
+    .risk-high { color: #dc3545; font-weight: bold; font-size: 24px; }
+    .risk-low { color: #28a745; font-weight: bold; }
+    .triage-wellness { border-left-color: #28a745; }
+    .triage-checkin { border-left-color: #ffc107; }
+    .triage-therapist { border-left-color: #fd7e14; }
+    .triage-critical { border-left-color: #dc3545; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,13 +54,14 @@ def load_model():
         model_path = os.path.join(SCRIPT_DIR, 'suicide_detection_model.pkl')
         vectorizer_path = os.path.join(SCRIPT_DIR, 'tfidf_vectorizer.pkl')
         
+        if not os.path.exists(model_path):
+            return None, None
+            
         model = joblib.load(model_path)
         vectorizer = joblib.load(vectorizer_path)
         
         return model, vectorizer
     except Exception as e:
-        st.error(f"Error loading model: {e}")
-        st.info("Please train the model first by running: `python train_model.py`")
         return None, None
 
 
@@ -75,12 +69,10 @@ def preprocess_text(text):
     """Clean text for analysis."""
     if not text:
         return ""
-    
     text = str(text).lower()
     text = re.sub(r'http\S+|www\S+', '', text)
     text = re.sub(r'[^a-zA-Z0-9\s.,!?\'" -]', '', text)
     text = ' '.join(text.split())
-    
     return text
 
 
@@ -88,7 +80,6 @@ def predict_risk(text, model, vectorizer):
     """Predict suicide risk."""
     cleaned = preprocess_text(text)
     text_tfidf = vectorizer.transform([cleaned])
-    
     prediction = model.predict(text_tfidf)[0]
     probabilities = model.predict_proba(text_tfidf)[0]
     
@@ -109,202 +100,154 @@ def display_crisis_resources():
     st.sidebar.title("🆘 Crisis Resources")
     st.sidebar.markdown("""
     ### 📞 988 Suicide & Crisis Lifeline
-    **Call or Text: 988**
+    **Call or Text: 988** (US/Canada)
     
     Available 24/7 - Free and confidential
     
     ---
-    
-    ### � Crisis Text Line
+    ### 💬 Crisis Text Line
     **Text HOME to 741741**
     
     ---
-    
     ### 🚑 Emergency
     **Call 911**
     
-    For immediate life-threatening emergencies
-    
     ---
-    
-    ### 🌐 International Resources
-    Visit: [findahelpline.com](https://findahelpline.com)
+    ### 🌐 International
+    [findahelpline.com](https://findahelpline.com)
     """)
+
+def sidebar_onboarding():
+    st.sidebar.title("📋 User Onboarding")
+    static_factors = {}
+    with st.sidebar.expander("Risk History"):
+        if st.checkbox("Family history of Mood Disorders"):
+            static_factors["Mood Disorders"] = True
+        if st.checkbox("Family history of Psychotic Disorders"):
+            static_factors["Psychotic Disorders"] = True
+        if st.checkbox("Chronic work/life stress"):
+            static_factors["Anxiety Disorders"] = True
+        if st.checkbox("Previous trauma experience"):
+            static_factors["Trauma-Related"] = True
+    return static_factors
 
 
 def main():
-    # Load model
+    if 'entries' not in st.session_state:
+        st.session_state.entries = []
+    if 'assistant' not in st.session_state:
+        st.session_state.assistant = DiagnosticAssistant()
+    
     model, vectorizer = load_model()
-    
-    if model is None or vectorizer is None:
-        st.stop()
-    
-    # Emergency banner
-    st.markdown("""
-    <div class="crisis-banner">
-        🆘 CRISIS SUPPORT: Call 988 (US) or your local emergency number - Available 24/7
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Title
-    st.title("💙 ML-Based Suicide Risk Analyzer")
-    st.markdown("""
-    This tool uses machine learning trained on 100,000 samples to detect suicide risk in text.
-    
-    **Model Performance:**
-    - 93% Accuracy
-    - 94% Precision  
-    - 92% Recall
-    """)
-    
-    # Display sidebar resources
+    static_factors = sidebar_onboarding()
     display_crisis_resources()
     
-    # Disclaimer
-    with st.expander("⚠️ Important Disclaimer"):
-        st.warning("""
-        **This tool is for analytical support only and does NOT replace professional judgment.**
-        
-        - This is not a medical diagnosis
-        - Always consult licensed mental health professionals
-        - If someone is in immediate danger, call 911 or go to the nearest emergency room
-        - Crisis support is available 24/7 at 988
-        """)
+    st.markdown('<div class="crisis-banner">🆘 CRISIS SUPPORT: Call 988 (US) or local emergency - 24/7</div>', unsafe_allow_html=True)
+    st.title("🧠 Clinical Mental Health Assistant")
     
-    # Main input
-    st.markdown("---")
-    st.markdown("### � Enter Text to Analyze")
+    tab_ml, tab_dsm, tab_data = st.tabs(["🎯 Suicide Risk (ML)", "📋 Diagnostics (DSM-5)", "📊 Data Insights"])
     
-    input_text = st.text_area(
-        "Paste or type text:",
-        height=200,
-        placeholder="Enter text here for analysis..."
-    )
-    
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        analyze_btn = st.button("🔍 Analyze", type="primary", use_container_width=True)
-    
-    with col2:
-        clear_btn = st.button("🗑️ Clear", use_container_width=True)
-    
-    if clear_btn:
-        st.rerun()
-    
-    # Analysis
-    if analyze_btn:
-        if not input_text.strip():
-            st.warning("⚠️ Please enter some text to analyze.")
+    with tab_ml:
+        if model is None:
+            st.warning("Model files not found. Please train the model in the 'train_model.py' script.")
+            st.info("The app will proceed with DSM-5 Diagnostics and Data Insights only.")
         else:
-            with st.spinner("Analyzing..."):
-                risk, confidence, is_high_risk = predict_risk(input_text, model, vectorizer)
-                
-                st.markdown("---")
-                
-                if is_high_risk:
-                    # HIGH RISK - Show crisis resources first
-                    st.error("# 🚨 SUICIDE RISK DETECTED 🚨")
-                    
-                    st.markdown("""
-                    <div style="background-color: #ff4444; color: white; padding: 30px; 
-                                border-radius: 10px; font-size: 18px; line-height: 2;">
-                        <h2 style="color: white;">⚠️ IMMEDIATE SUPPORT AVAILABLE</h2>
-                        
-                        <p><strong>🔴 Call 988 - Suicide & Crisis Lifeline</strong><br>
-                        Available 24/7 - Free and confidential</p>
-                        
-                        <p><strong>💬 Text HOME to 741741</strong><br>
-                        Crisis Text Line</p>
-                        
-                        <p><strong>🚑 Emergency: Call 911</strong><br>
-                        For immediate life-threatening situations</p>
-                        
-                        <hr style="border-color: white;">
-                        
-                        <p style="font-size: 24px;">💙 You are not alone. Help is available right now.</p>
+            st.markdown("### 🎯 ML Suicide Risk Detection")
+            st.markdown("This section uses a Logistic Regression model trained on 1M+ samples.")
+            input_text = st.text_area("Analyze text for suicide risk:", height=150, key="ml_input", placeholder="Type or paste text here...")
+            if st.button("🔍 Run ML Analysis", type="primary"):
+                if not input_text.strip():
+                    st.warning("Please enter some text to analyze.")
+                    return
+                with st.spinner("Analyzing risk..."):
+                    risk, conf, is_high = predict_risk(input_text, model, vectorizer)
+                    st.markdown("---")
+                    if is_high:
+                        st.error(f"🚨 {risk}")
+                        st.metric("Model Confidence", f"{conf*100:.1f}%")
+                        st.warning("⚠️ High Risk detected. Please utilize the crisis resources in the sidebar.")
+                    else:
+                        st.success(f"✓ {risk}")
+                        st.metric("Model Confidence", f"{conf*100:.1f}%")
+
+    with tab_dsm:
+        st.markdown("### 📋 DSM-5 Multi-Disorder Diagnostics")
+        st.info("Input text entries below to see risk clustering across 7 clinical categories.")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            dsm_input = st.text_area("Add journal entry or text for tracking:", height=150, key="dsm_input", placeholder="I feel very sad and can't focus on work...")
+        with col2:
+            dsm_date = st.date_input("Entry Date", datetime.now())
+            if st.button("➕ Add & Analyze Entry", use_container_width=True):
+                if dsm_input.strip():
+                    st.session_state.entries.append({"text": dsm_input, "date": dsm_date.strftime("%Y-%m-%d")})
+                    st.success("Entry added to tracking.")
+                else:
+                    st.warning("Please enter text.")
+        
+        if st.session_state.entries:
+            st.markdown("---")
+            report = st.session_state.assistant.analyze(st.session_state.entries, static_factors)
+            
+            # Radar Chart
+            df_plot = pd.DataFrame(report["diagnostics"])
+            fig = px.line_polar(df_plot, r='Score', theta='Condition', line_close=True, range_r=[0,100], markers=True, title="DSM-5 Risk Polar Map")
+            fig.update_traces(fill='toself')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Detailed Triage
+            st.markdown("#### Detailed Diagnostic Assessment")
+            for diag in sorted(report["diagnostics"], key=lambda x: x['Score'], reverse=True):
+                if diag['Score'] > 10:
+                    triage_class = "triage-critical" if diag['Score'] > 85 else "triage-therapist" if diag['Score'] > 60 else "triage-checkin" if diag['Score'] > 30 else "triage-wellness"
+                    st.markdown(f"""
+                    <div class="report-section {triage_class}">
+                        <h4 style="margin:0;">{diag['Condition']} ({diag['Score']}/100)</h4>
+                        <p style="margin:5px 0;"><strong>Recommendation:</strong> {diag['Recommended_Action']}</p>
+                        <small>Evidence: {', '.join(diag['Evidence_Detected']) if diag['Evidence_Detected'] else 'No specific patterns detected.'}</small>
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    st.markdown("---")
-                    
-                    # Show prediction details
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Risk Level", risk, delta=None)
-                    with col2:
-                        st.metric("Model Confidence", f"{confidence*100:.1f}%")
-                    
-                    st.warning("""
-                    **Recommended Action:**
-                    - Do not leave the person alone
-                    - Encourage immediate professional contact
-                    - Call 988 or visit nearest emergency room
-                    - Remove access to lethal means if possible
-                    """)
-                    
+            
+            if st.button("🗑️ Clear Tracking History"):
+                st.session_state.entries = []
+                st.rerun()
+
+    with tab_data:
+        st.markdown("### 📊 Mental Health Dataset Insights")
+        st.markdown("Explore the statistics behind the training data and community surveys.")
+        datasets = {
+            "Suicide Detection (Main Model)": "Suicide_Detection.csv",
+            "Student Mental Health": "Student Mental health.csv",
+            "Survey (General Anxiety/Depression)": "survey.csv",
+            "Music & Mental Health": "mxmh_survey_results.csv"
+        }
+        selected_ds = st.selectbox("Select Dataset to Explore", list(datasets.keys()))
+        data_path = os.path.join(SCRIPT_DIR, datasets[selected_ds])
+        
+        if os.path.exists(data_path):
+            try:
+                df_view = pd.read_csv(data_path, nrows=500)
+                st.write(f"Sample data from `{datasets[selected_ds]}`")
+                st.dataframe(df_view.head(10), use_container_width=True)
+                
+                # Visualizations
+                st.markdown("#### Primary Labels Distribution")
+                possible_targets = ['class', 'label', 'Treatment', 'Depression', 'Anxiety']
+                target = next((col for col in possible_targets if col in df_view.columns), None)
+                
+                if target:
+                    col_p1, col_p2 = st.columns(2)
+                    with col_p1:
+                        st.plotly_chart(px.pie(df_view, names=target, title=f"Distribution of '{target}'"), use_container_width=True)
+                    with col_p2:
+                        st.plotly_chart(px.histogram(df_view, x=target, title=f"Frequency of '{target}'"), use_container_width=True)
                 else:
-                    # LOW RISK - Normal display
-                    st.success("### Analysis Complete")
+                    st.info("No categorical label column found for visualization.")
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f'<p class="risk-low">✓ {risk}</p>', unsafe_allow_html=True)
-                    with col2:
-                        st.metric("Confidence", f"{confidence*100:.1f}%")
-                    
-                    st.info("""
-                    **Recommendation:**
-                    - Standard support and monitoring
-                    - Encourage self-care and wellness
-                    - Crisis resources available if needed (see sidebar)
-                    """)
-                
-                # Save results option
-                st.markdown("---")
-                
-                report = f"""
-SUICIDE RISK ANALYSIS REPORT
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-RISK LEVEL: {risk}
-CONFIDENCE: {confidence*100:.1f}%
-
-MODEL INFORMATION:
-- Algorithm: Logistic Regression with TF-IDF
-- Training Dataset: 100,000 samples
-- Accuracy: 93%
-- Precision: 94%
-- Recall: 92%
-
-INPUT TEXT:
-{input_text}
-
-DISCLAIMER:
-This is an automated analysis and NOT a medical diagnosis.
-Always consult with licensed mental health professionals.
-
-CRISIS RESOURCES:
-- 988 Suicide & Crisis Lifeline (Call or text 988)
-- Crisis Text Line (Text HOME to 741741)
-- Emergency Services (Call 911)
-"""
-                
-                st.download_button(
-                    "📥 Download Report",
-                    data=report,
-                    file_name=f"risk_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
-                )
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #6c757d; font-size: 14px;">
-        <p>💙 This tool supports, never replaces, human judgment and compassion.</p>
-        <p>Model trained on Suicide_Detection.csv dataset (1M+ samples)</p>
-    </div>
-    """, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Error loading visualization: {e}")
+        else:
+            st.error(f"Dataset file `{datasets[selected_ds]}` not found.")
 
 
 if __name__ == "__main__":
