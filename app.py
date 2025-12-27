@@ -14,6 +14,7 @@ from datetime import datetime
 import re
 import json
 from diagnostic_engine import DiagnosticAssistant
+from situational_analyzer import SituationalAnalyzer
 
 # Get script directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +44,14 @@ st.markdown("""
     .triage-checkin { border-left-color: #ffc107; }
     .triage-therapist { border-left-color: #fd7e14; }
     .triage-critical { border-left-color: #dc3545; }
+    .pom-card {
+        background-color: #e3f2fd; padding: 20px; border-radius: 10px;
+        border-top: 5px solid #2196f3; margin-bottom: 20px;
+    }
+    .grounding-box {
+        background-color: #fff3e0; padding: 20px; border-radius: 10px;
+        border: 2px dashed #ff9800; margin-top: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -155,6 +164,8 @@ def main():
         st.session_state.entries = []
     if 'assistant' not in st.session_state:
         st.session_state.assistant = DiagnosticAssistant()
+    if 'situational' not in st.session_state:
+        st.session_state.situational = SituationalAnalyzer()
     
     models = load_models()
     static_factors = sidebar_onboarding()
@@ -163,10 +174,11 @@ def main():
     st.markdown('<div class="crisis-banner">🆘 CRISIS SUPPORT: Call 988 (US) or local emergency - 24/7</div>', unsafe_allow_html=True)
     st.title("🧠 Clinical Mental Health Assistant")
     
-    tab_ml, tab_multi, tab_dsm, tab_data = st.tabs([
+    tab_ml, tab_multi, tab_dsm, tab_situational, tab_data = st.tabs([
         "🎯 Suicide Risk (ML)", 
         "🧠 Condition Prediction (ML)", 
         "📋 Diagnostics (DSM-5)", 
+        "🌱 Peace of Mind (Situational)",
         "📊 Data Insights"
     ])
     
@@ -206,6 +218,58 @@ def main():
                 
                 if conf < 0.4:
                     st.warning("⚠️ Low confidence prediction. Results may be inaccurate.")
+
+    with tab_situational:
+        st.markdown("### 🌱 Holistic Situational Crisis Analysis")
+        st.markdown("Identify life stressors (Financial, Social, Academic) and receive 'Pieces of Mind'.")
+        
+        sit_input = st.text_area("What is weighing on your mind today?", height=150, key="sit_input", 
+                                placeholder="I lost everything in a trade today and feel fucked up from life...")
+        
+        if st.button("⚖️ Analyze Situation"):
+            if not sit_input.strip():
+                st.warning("Please share what's happening.")
+            else:
+                result = st.session_state.situational.analyze(sit_input)
+                
+                # 1. Validation
+                st.markdown(f"#### 💬 Validation")
+                st.info(result['validation'])
+                
+                # 2. Grounding (Priority if emergency)
+                if result['is_emergency']:
+                    st.markdown('<div class="grounding-box">', unsafe_allow_html=True)
+                    st.warning("### 🧘 Immediate Grounding Needed")
+                    for step in result['grounding']:
+                        st.write(step)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                # 3. Assessment
+                st.markdown("#### 📊 Peace of Mind Assessment")
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    st.metric("Peace of Mind Score", f"{result['pom_score']}/100", 
+                             delta=f"{result['pom_score'] - 50}", delta_color="normal")
+                with col_p2:
+                    st.progress(result['pom_score'] / 100)
+                
+                # 4. Stressors and Articles
+                if result['stressors']:
+                    st.markdown("#### 🛠️ Your 'Piece of Mind' Toolbox")
+                    for s in result['stressors']:
+                        with st.expander(f"📌 Detected: {s['theme']}"):
+                            st.write(f"**Keywords:** {', '.join(s['keywords'])}")
+                            st.write(f"**Search Query:** `{s['search_query']}`")
+                            if s['article']:
+                                st.markdown(f"""
+                                <div class="pom-card">
+                                    <strong>📖 Suggested Article:</strong><br>
+                                    <a href="{s['article']['url']}" target="_blank">{s['article']['title']}</a><br>
+                                    <small>{s['article']['description']}</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                else:
+                    st.success("No acute situational stressors detected. Keep maintaining your peace of mind!")
 
     with tab_dsm:
         st.markdown("### 📋 DSM-5 Multi-Disorder Diagnostics")
