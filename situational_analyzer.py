@@ -144,3 +144,4 @@ class SituationalAnalyzer:
             return "Dealing with failure or pressure in your career/studies can make you feel stuck. It's a lot to handle."
         else:
             return "I hear how heavy things feel right now. It's understandable to feel this way when everything seems to be going wrong."
+# Dummy change to trigger redeploy
