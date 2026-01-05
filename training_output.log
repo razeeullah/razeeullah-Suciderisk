@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/mc/Desktop/UNIVERSITY COURSES/AI/Sucideriskanlyser/train_model.py", line 8, in <module>
-    import pandas as pd
-ModuleNotFoundError: No module named 'pandas'

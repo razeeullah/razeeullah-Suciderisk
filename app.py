@@ -1,165 +1,198 @@
 """
 Unified Clinical Mental Health Assistant
-Version: 2.0.0 (Unified ML & DSM-5)
+Version: 2.1.0 (Viva Edition - Multi-Model)
 
-Combines ML-based suicide risk detection with DSM-5 diagnostic analysis.
+This application combines machine learning (ML) models with clinical analysis 
+to detect suicide risk and predict mental health conditions based on text input.
 """
 
 import streamlit as st
 import joblib
 import os
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from datetime import datetime
 import re
 import json
+
+# Internal module imports
 from diagnostic_engine import DiagnosticAssistant
 from situational_analyzer import SituationalAnalyzer
 
-# Get script directory
+# ---------------------------------------------------------
+# SETUP & CONFIGURATION
+# ---------------------------------------------------------
+
+# Set base directory for pathing
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Page config
 st.set_page_config(
-    page_title="Clinical Mental Health Assistant",
+    page_title="Mental Health Assistant",
     page_icon="🧠",
     layout="wide"
 )
 
-# CSS
+# Custom Enhanced CSS for a professional look
 st.markdown("""
 <style>
+    .main-header { font-size: 2.5rem; font-weight: 700; color: #1E3A8A; margin-bottom: 1rem; }
     .crisis-banner {
-        background-color: #ff4444; color: white; padding: 20px;
-        border-radius: 10px; text-align: center; font-weight: bold;
-        font-size: 20px; margin-bottom: 20px;
+        background-color: #EF4444; color: white; padding: 25px;
+        border-radius: 12px; text-align: center; font-weight: 800;
+        font-size: 22px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     .report-section {
-        background-color: #f8f9fa; padding: 20px; border-radius: 10px;
-        margin: 10px 0; border-left: 5px solid #007bff;
+        background-color: #F3F4F6; padding: 20px; border-radius: 10px;
+        margin: 15px 0; border-left: 6px solid #3B82F6;
     }
-    .risk-high { color: #dc3545; font-weight: bold; font-size: 24px; }
-    .risk-low { color: #28a745; font-weight: bold; }
-    .triage-wellness { border-left-color: #28a745; }
-    .triage-checkin { border-left-color: #ffc107; }
-    .triage-therapist { border-left-color: #fd7e14; }
-    .triage-critical { border-left-color: #dc3545; }
+    .risk-high { color: #DC2626; font-weight: bold; font-size: 24px; }
+    .risk-low { color: #059669; font-weight: bold; }
+    .triage-wellness { border-left-color: #10B981; }
+    .triage-checkin { border-left-color: #F59E0B; }
+    .triage-therapist { border-left-color: #F97316; }
+    .triage-critical { border-left-color: #DC2626; }
     .pom-card {
-        background-color: #e3f2fd; padding: 20px; border-radius: 10px;
-        border-top: 5px solid #2196f3; margin-bottom: 20px;
+        background-color: #EFF6FF; padding: 20px; border-radius: 12px;
+        border-top: 5px solid #3B82F6; margin-bottom: 20px;
     }
     .grounding-box {
-        background-color: #fff3e0; padding: 20px; border-radius: 10px;
-        border: 2px dashed #ff9800; margin-top: 10px;
+        background-color: #FFF7ED; padding: 20px; border-radius: 12px;
+        border: 2px dashed #F97316; margin-top: 15px;
     }
+    .stTextArea textarea { font-size: 1.1rem; }
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------
+# CORE ANALYTIC FUNCTIONS
+# ---------------------------------------------------------
 
 @st.cache_resource
-def load_models():
-    """Load all trained ML models and vectorizers."""
+def load_all_models():
+    """
+    Load all trained ML models and vectorizers from the filesystem.
+    Models are cached to improve performance.
+    """
     models = {}
     try:
-        # Suicide Model
-        s_model_path = os.path.join(SCRIPT_DIR, 'suicide_detection_model.pkl')
+        # 1. Suicide Risk Detection Models
+        s_models_config = {
+            'Linear Regression': 'suicide_linear_regression_model.pkl',
+            'Logistic Regression': 'suicide_logistic_regression_model.pkl',
+            'SVM': 'suicide_svm_model.pkl'
+        }
         s_vec_path = os.path.join(SCRIPT_DIR, 'tfidf_vectorizer.pkl')
-        if os.path.exists(s_model_path):
-            models['suicide'] = joblib.load(s_model_path)
+        
+        if os.path.exists(s_vec_path):
             models['suicide_vec'] = joblib.load(s_vec_path)
+            for name, filename in s_models_config.items():
+                m_path = os.path.join(SCRIPT_DIR, filename)
+                if os.path.exists(m_path):
+                    models[f'suicide_{name}'] = joblib.load(m_path)
             
-        # Multi-Condition Model
-        m_model_path = os.path.join(SCRIPT_DIR, 'multi_condition_model.pkl')
+        # 2. Multi-Condition Classification Models
+        m_models_config = {
+            'Linear Regression': 'multi_linear_regression_model.pkl',
+            'Logistic Regression': 'multi_logistic_regression_model.pkl',
+            'SVM': 'multi_svm_model.pkl'
+        }
         m_vec_path = os.path.join(SCRIPT_DIR, 'multi_tfidf.pkl')
-        if os.path.exists(m_model_path):
-            models['multi'] = joblib.load(m_model_path)
+        
+        if os.path.exists(m_vec_path):
             models['multi_vec'] = joblib.load(m_vec_path)
+            for name, filename in m_models_config.items():
+                m_path = os.path.join(SCRIPT_DIR, filename)
+                if os.path.exists(m_path):
+                    models[f'multi_{name}'] = joblib.load(m_path)
             
         return models
     except Exception as e:
+        st.error(f"Error loading model resources: {e}")
         return models
 
-
-def predict_condition(text, models):
-    """Predict mental health condition using ML."""
-    if 'multi' not in models:
-        return None, None
-    cleaned = preprocess_text(text)
-    vec = models['multi_vec'].transform([cleaned])
-    prediction = models['multi'].predict(vec)[0]
-    probs = models['multi'].predict_proba(vec)[0]
-    conf = max(probs)
-    return prediction, conf
-
-
 def preprocess_text(text):
-    """Clean text for analysis."""
+    """
+    Standard text cleaning pipeline for ML inference.
+    """
     if not text:
         return ""
     text = str(text).lower()
-    text = re.sub(r'http\S+|www\S+', '', text)
-    text = re.sub(r'[^a-zA-Z0-9\s.,!?\'" -]', '', text)
-    text = ' '.join(text.split())
+    text = re.sub(r'http\S+|www\S+', '', text) # Remove URLs
+    text = re.sub(r'[^a-zA-Z0-9\s.,!?\'" -]', '', text) # Remove special chars
+    text = ' '.join(text.split()) # Normalize whitespace
     return text
 
-
-def predict_risk(text, model, vectorizer):
-    """Predict suicide risk."""
+def predict_suicide_risk(text, model, vectorizer, model_name=""):
+    """
+    Predict binary suicide risk using the selected ML model.
+    """
     cleaned = preprocess_text(text)
     text_tfidf = vectorizer.transform([cleaned])
-    prediction = model.predict(text_tfidf)[0]
-    probabilities = model.predict_proba(text_tfidf)[0]
     
-    if prediction == 1:
-        risk = "SUICIDE RISK DETECTED"
-        confidence = probabilities[1]
-        is_high_risk = True
+    # Linear Regression yields continuous output; we threshold at 0.5
+    if "Linear" in model_name:
+        prediction_val = model.predict(text_tfidf)[0]
+        prediction = 1 if prediction_val >= 0.5 else 0
+        probabilities = [max(0, 1 - prediction_val), min(1, prediction_val)]
     else:
-        risk = "Low Risk"
-        confidence = probabilities[0]
-        is_high_risk = False
+        prediction = model.predict(text_tfidf)[0]
+        probabilities = model.predict_proba(text_tfidf)[0]
     
-    return risk, confidence, is_high_risk
+    risk_label = "SUICIDE RISK DETECTED" if prediction == 1 else "Low Risk"
+    confidence = probabilities[1] if prediction == 1 else probabilities[0]
+    
+    return risk_label, confidence, (prediction == 1)
 
+def predict_condition(text, models, model_name="Logistic Regression"):
+    """
+    Predict multi-class mental health condition.
+    """
+    model_key = f'multi_{model_name}'
+    if model_key not in models:
+        return None, None
+        
+    cleaned = preprocess_text(text)
+    vec = models['multi_vec'].transform([cleaned])
+    prediction = models[model_key].predict(vec)[0]
+    
+    # Handle confidence estimation for different model types
+    if hasattr(models[model_key], "predict_proba"):
+        probs = models[model_key].predict_proba(vec)[0]
+        conf = max(probs)
+    else:
+        # For Ridge/Linear, we use decision_function with softmax as proxy
+        d_func = models[model_key].decision_function(vec)[0]
+        exp_d = np.exp(d_func - np.max(d_func))
+        probs = exp_d / exp_d.sum()
+        conf = max(probs)
+        
+    return prediction, conf
 
-def display_crisis_resources():
-    """Display crisis resources."""
-    st.sidebar.title("🆘 Crisis Resources")
+# ---------------------------------------------------------
+# UI COMPONENTS
+# ---------------------------------------------------------
+
+def display_sidebar_resources():
+    """Helper for crisis resource sidebar."""
+    st.sidebar.title("🆘 Support Hotlines")
     st.sidebar.markdown("""
-    ### 📞 988 Suicide & Crisis Lifeline
-    **Call or Text: 988** (US/Canada)
+    **National Suicide & Crisis Lifeline**
+    - Call or Text: **988**
+    - Available 24/7 across US/Canada
     
-    Available 24/7 - Free and confidential
+    **Crisis Text Line**
+    - Text **HOME** to **741741**
     
-    ---
-    ### 💬 Crisis Text Line
-    **Text HOME to 741741**
-    
-    ---
-    ### 🚑 Emergency
-    **Call 911**
-    
-    ---
-    ### 🌐 International
-    [findahelpline.com](https://findahelpline.com)
+    **International Support**
+    - [findahelpline.com](https://findahelpline.com)
     """)
-
-def sidebar_onboarding():
-    st.sidebar.title("📋 User Onboarding")
-    static_factors = {}
-    with st.sidebar.expander("Risk History"):
-        if st.checkbox("Family history of Mood Disorders"):
-            static_factors["Mood Disorders"] = True
-        if st.checkbox("Family history of Psychotic Disorders"):
-            static_factors["Psychotic Disorders"] = True
-        if st.checkbox("Chronic work/life stress"):
-            static_factors["Anxiety Disorders"] = True
-        if st.checkbox("Previous trauma experience"):
-            static_factors["Trauma-Related"] = True
-    return static_factors
-
+    
+    st.sidebar.divider()
+    st.sidebar.info("Disclaimer: This tool is for clinical research and academic demonstration only. It is not an emergency response system.")
 
 def main():
+    # Initialize components
     if 'entries' not in st.session_state:
         st.session_state.entries = []
     if 'assistant' not in st.session_state:
@@ -167,189 +200,155 @@ def main():
     if 'situational' not in st.session_state:
         st.session_state.situational = SituationalAnalyzer()
     
-    models = load_models()
-    static_factors = sidebar_onboarding()
-    display_crisis_resources()
+    models = load_all_models()
+    display_sidebar_resources()
     
-    st.markdown('<div class="crisis-banner">🆘 CRISIS SUPPORT: Call 988 (US) or local emergency - 24/7</div>', unsafe_allow_html=True)
-    st.title("🧠 Clinical Mental Health Assistant")
-    
-    tab_ml, tab_multi, tab_dsm, tab_situational, tab_data = st.tabs([
+    # Main Header
+    st.markdown('<div class="crisis-banner">🆘 EMERGENCY: CALL 988 (USA) OR LOCAL SERVICES - YOU ARE NOT ALONE</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🧠 Clinical Mental Health Assistant</div>', unsafe_allow_html=True)
+    st.write("Advanced diagnostic tool integrating Machine Learning with DSM-5 guidelines.")
+
+    # Application Tabs
+    tabs = st.tabs([
         "🎯 Suicide Risk (ML)", 
-        "🧠 Condition Prediction (ML)", 
+        "🧬 Condition Prediction (ML)", 
         "📋 Diagnostics (DSM-5)", 
         "🌱 Peace of Mind (Situational)",
-        "📊 Data Insights"
+        "📊 Dataset Explorer"
     ])
     
-    with tab_ml:
-        if 'suicide' not in models:
-            st.warning("Suicide model files not found. Please train 'train_model.py'.")
+    # TAB 1: SUICIDE RISK ANALYSIS
+    with tabs[0]:
+        available_s_models = [k.replace('suicide_', '') for k in models.keys() if k.startswith('suicide_') and k != 'suicide_vec']
+        
+        if not available_s_models:
+            st.warning("Suicide detection models not found. Please run the training pipeline.")
         else:
-            st.markdown("### 🎯 ML Suicide Risk Detection")
-            st.markdown("Binary classification: Suicide Risk vs. Low Risk.")
-            input_text = st.text_area("Analyze text for suicide risk:", height=150, key="ml_input")
-            if st.button("🔍 Run Suicide Analysis", type="primary"):
-                if not input_text.strip(): st.warning("Please enter text."); return
-                risk, conf, is_high = predict_risk(input_text, models['suicide'], models['suicide_vec'])
-                if is_high:
-                    st.error(f"🚨 {risk}")
-                    st.metric("Confidence", f"{conf*100:.1f}%")
-                else:
-                    st.success(f"✓ {risk}")
-                    st.metric("Confidence", f"{conf*100:.1f}%")
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.subheader("🎯 ML Suicide Detection")
+                input_text = st.text_area("Analyze patient text:", height=200, key="ml_input_viva")
+            with col2:
+                st.subheader("Model Settings")
+                s_model_choice = st.selectbox("Inference Algorithm:", available_s_models, index=available_s_models.index('SVM') if 'SVM' in available_s_models else 0)
+                st.info("Compare model outputs to see different classification behaviors.")
 
-    with tab_multi:
-        if 'multi' not in models:
-            st.warning("Multi-condition model not found. Please train 'train_multi_model.py'.")
-        else:
-            st.markdown("### 🧠 ML Clinical Condition Prediction")
-            st.markdown("Predicts specific DSM-labeled conditions using the new multi-class model.")
-            multi_input = st.text_area("Enter text for condition prediction:", height=150, key="multi_input", placeholder="e.g., I've been feeling extremely worried about everything lately...")
-            if st.button("🔮 Predict Condition"):
-                if not multi_input.strip(): st.warning("Please enter text."); return
-                condition, conf = predict_condition(multi_input, models)
+            if st.button("🔍 Analyze Risk", type="primary"):
+                if not input_text.strip():
+                    st.warning("Missing input text."); return
+                
+                risk, conf, is_high = predict_suicide_risk(input_text, models[f'suicide_{s_model_choice}'], models['suicide_vec'], s_model_choice)
+                
                 st.markdown("---")
-                if condition == "None/General":
-                    st.info(f"💡 Prediction: **{condition}**")
+                if is_high:
+                    st.markdown(f'<div class="risk-high">🚨 {risk}</div>', unsafe_allow_html=True)
                 else:
-                    st.success(f"🩺 Predicted Condition: **{condition}**")
-                st.metric("Model Confidence", f"{conf*100:.1f}%")
+                    st.markdown(f'<div class="risk-low">✅ {risk}</div>', unsafe_allow_html=True)
                 
-                if conf < 0.4:
-                    st.warning("⚠️ Low confidence prediction. Results may be inaccurate.")
+                st.metric(f"Confidence Level ({s_model_choice})", f"{conf*100:.2f}%")
 
-    with tab_situational:
-        st.markdown("### 🌱 Holistic Situational Crisis Analysis")
-        st.markdown("Identify life stressors (Financial, Social, Academic) and receive 'Pieces of Mind'.")
+    # TAB 2: CONDITION CLASSIFICATION
+    with tabs[1]:
+        available_m_models = [k.replace('multi_', '') for k in models.keys() if k.startswith('multi_') and k != 'multi_vec']
         
-        sit_input = st.text_area("What is weighing on your mind today?", height=150, key="sit_input", 
-                                placeholder="I lost everything in a trade today and feel fucked up from life...")
-        
-        if st.button("⚖️ Analyze Situation"):
-            if not sit_input.strip():
-                st.warning("Please share what's happening.")
-            else:
-                result = st.session_state.situational.analyze(sit_input)
-                
-                # 1. Validation
-                st.markdown(f"#### 💬 Validation")
-                st.info(result['validation'])
-                
-                # 2. Grounding (Priority if emergency)
-                if result['is_emergency']:
-                    st.markdown('<div class="grounding-box">', unsafe_allow_html=True)
-                    st.warning("### 🧘 Immediate Grounding Needed")
-                    for step in result['grounding']:
-                        st.write(step)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                # 3. Assessment
-                st.markdown("#### 📊 Peace of Mind Assessment")
-                col_p1, col_p2 = st.columns(2)
-                with col_p1:
-                    st.metric("Peace of Mind Score", f"{result['pom_score']}/100", 
-                             delta=f"{result['pom_score'] - 50}", delta_color="normal")
-                with col_p2:
-                    st.progress(result['pom_score'] / 100)
-                
-                # 4. Stressors and Articles
-                if result['stressors']:
-                    st.markdown("#### 🛠️ Your 'Piece of Mind' Toolbox")
-                    for s in result['stressors']:
-                        with st.expander(f"📌 Detected: {s['theme']}"):
-                            st.write(f"**Keywords:** {', '.join(s['keywords'])}")
-                            st.write(f"**Search Query:** `{s['search_query']}`")
-                            if s['article']:
-                                st.markdown(f"""
-                                <div class="pom-card">
-                                    <strong>📖 Suggested Article:</strong><br>
-                                    <a href="{s['article']['url']}" target="_blank">{s['article']['title']}</a><br>
-                                    <small>{s['article']['description']}</small>
-                                </div>
-                                """, unsafe_allow_html=True)
-                else:
-                    st.success("No acute situational stressors detected. Keep maintaining your peace of mind!")
+        if not available_m_models:
+            st.warning("Multi-class models not found.")
+        else:
+            st.subheader("🧠 Multi-Condition Condition Classifier")
+            multi_input = st.text_area("Patient Journal Entry:", height=200, key="multi_input_viva")
+            
+            m_col1, m_col2 = st.columns([1, 1])
+            with m_col1:
+                m_model_choice = st.radio("Classification Engine:", available_m_models, horizontal=True)
+            
+            if st.button("🔮 Predict Condition"):
+                if not multi_input.strip():
+                    st.warning("Missing input."); return
+                    
+                cond, conf = predict_condition(multi_input, models, m_model_choice)
+                st.markdown("---")
+                st.header(f"🩺 Prediction: {cond}")
+                st.metric("Probability Score", f"{conf*100:.1f}%")
 
-    with tab_dsm:
-        st.markdown("### 📋 DSM-5 Multi-Disorder Diagnostics")
-        st.info("Input text entries below to see risk clustering across 7 clinical categories.")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            dsm_input = st.text_area("Add journal entry or text for tracking:", height=150, key="dsm_input", placeholder="I feel very sad and can't focus on work...")
-        with col2:
-            dsm_date = st.date_input("Entry Date", datetime.now())
-            if st.button("➕ Add & Analyze Entry", use_container_width=True):
-                if dsm_input.strip():
-                    st.session_state.entries.append({"text": dsm_input, "date": dsm_date.strftime("%Y-%m-%d")})
-                    st.success("Entry added to tracking.")
-                else:
-                    st.warning("Please enter text.")
+    # TAB 3: DSM-5 DIAGNOSTICS (Procedural Logic)
+    with tabs[2]:
+        st.subheader("📋 Rule-Based Diagnostic Engine")
+        st.markdown("Longitudinal analysis based on patterns within the DSM-5 framework.")
+        
+        col_in, col_set = st.columns([3, 1])
+        with col_in:
+            dsm_text = st.text_area("Add journal entry for sequence analysis:", height=150)
+        with col_set:
+            dsm_date = st.date_input("Clinical Date", datetime.now())
+            if st.button("➕ Log Entry", use_container_width=True):
+                if dsm_text.strip():
+                    st.session_state.entries.append({"text": dsm_text, "date": dsm_date.strftime("%Y-%m-%d")})
+                    st.success("Entry added.")
         
         if st.session_state.entries:
-            st.markdown("---")
-            report = st.session_state.assistant.analyze(st.session_state.entries, static_factors)
+            st.divider()
+            report = st.session_state.assistant.analyze(st.session_state.entries)
             
-            # Radar Chart
+            # Polar Chart Visualization
             df_plot = pd.DataFrame(report["diagnostics"])
-            fig = px.line_polar(df_plot, r='Score', theta='Condition', line_close=True, range_r=[0,100], markers=True, title="DSM-5 Risk Polar Map")
+            fig = px.line_polar(df_plot, r='Score', theta='Condition', line_close=True, range_r=[0,100], markers=True)
             fig.update_traces(fill='toself')
             st.plotly_chart(fig, use_container_width=True)
             
-            # Detailed Triage
-            st.markdown("#### Detailed Diagnostic Assessment")
             for diag in sorted(report["diagnostics"], key=lambda x: x['Score'], reverse=True):
                 if diag['Score'] > 10:
-                    triage_class = "triage-critical" if diag['Score'] > 85 else "triage-therapist" if diag['Score'] > 60 else "triage-checkin" if diag['Score'] > 30 else "triage-wellness"
+                    t_class = "triage-critical" if diag['Score'] > 85 else "triage-therapist" if diag['Score'] > 60 else "triage-checkin"
                     st.markdown(f"""
-                    <div class="report-section {triage_class}">
-                        <h4 style="margin:0;">{diag['Condition']} ({diag['Score']}/100)</h4>
-                        <p style="margin:5px 0;"><strong>Recommendation:</strong> {diag['Recommended_Action']}</p>
-                        <small>Evidence: {', '.join(diag['Evidence_Detected']) if diag['Evidence_Detected'] else 'No specific patterns detected.'}</small>
+                    <div class="report-section {t_class}">
+                        <h4>{diag['Condition']} - Score: {diag['Score']}/100</h4>
+                        <p><strong>Guidance:</strong> {diag['Recommended_Action']}</p>
+                        <small>Key patterns detected: {', '.join(diag['Evidence_Detected'])}</small>
                     </div>
                     """, unsafe_allow_html=True)
             
-            if st.button("🗑️ Clear Tracking History"):
+            if st.button("🗑️ Reset Tracking"):
                 st.session_state.entries = []
                 st.rerun()
 
-    with tab_data:
-        st.markdown("### 📊 Mental Health Dataset Insights")
-        st.markdown("Explore the statistics behind the training data and community surveys.")
-        datasets = {
-            "Suicide Detection (Main Model)": "Suicide_Detection.csv",
-            "Student Mental Health": "Student Mental health.csv",
-            "Survey (General Anxiety/Depression)": "survey.csv",
-            "Music & Mental Health": "mxmh_survey_results.csv"
-        }
-        selected_ds = st.selectbox("Select Dataset to Explore", list(datasets.keys()))
-        data_path = os.path.join(SCRIPT_DIR, datasets[selected_ds])
+    # TAB 4: SITUATIONAL ANALYSIS
+    with tabs[3]:
+        st.subheader("🌱 Holistic Situational Analyzer")
+        situ_text = st.text_area("Life stressor description:", height=200, placeholder="Describe the current life situation and stressors...")
         
-        if os.path.exists(data_path):
-            try:
-                df_view = pd.read_csv(data_path, nrows=500)
-                st.write(f"Sample data from `{datasets[selected_ds]}`")
-                st.dataframe(df_view.head(10), use_container_width=True)
+        if st.button("⚖️ Analyze Situation"):
+            if not situ_text.strip():
+                st.warning("Please enter context.")
+            else:
+                res = st.session_state.situational.analyze(situ_text)
+                st.info(f"**Clinical Insight:** {res['validation']}")
                 
-                # Visualizations
-                st.markdown("#### Primary Labels Distribution")
-                possible_targets = ['class', 'label', 'Treatment', 'Depression', 'Anxiety']
-                target = next((col for col in possible_targets if col in df_view.columns), None)
+                if res['is_emergency']:
+                    st.markdown('<div class="grounding-box">', unsafe_allow_html=True)
+                    st.warning("### 🧘 Immediate Intervention Required")
+                    for step in res['grounding']:
+                        st.write(f"- {step}")
+                    st.markdown('</div>', unsafe_allow_html=True)
                 
-                if target:
-                    col_p1, col_p2 = st.columns(2)
-                    with col_p1:
-                        st.plotly_chart(px.pie(df_view, names=target, title=f"Distribution of '{target}'"), use_container_width=True)
-                    with col_p2:
-                        st.plotly_chart(px.histogram(df_view, x=target, title=f"Frequency of '{target}'"), use_container_width=True)
-                else:
-                    st.info("No categorical label column found for visualization.")
-                    
-            except Exception as e:
-                st.error(f"Error loading visualization: {e}")
-        else:
-            st.error(f"Dataset file `{datasets[selected_ds]}` not found.")
+                col_m1, col_m2 = st.columns(2)
+                col_m1.metric("PoM Index", f"{res['pom_score']}/100")
+                col_m2.progress(res['pom_score']/100)
 
+    # TAB 5: DATASETS
+    with tabs[4]:
+        st.subheader("📊 Research Dataset Explorer")
+        ds_map = {
+            "Suicide Detection (Kaggle)": "Suicide_Detection.csv",
+            "Student Mental Health": "Student Mental health.csv",
+            "Anxiety/Depression Survey": "survey.csv"
+        }
+        choice = st.selectbox("View Source Data:", list(ds_map.keys()))
+        path = os.path.join(SCRIPT_DIR, ds_map[choice])
+        
+        if os.path.exists(path):
+            df_v = pd.read_csv(path, nrows=100)
+            st.dataframe(df_v, use_container_width=True)
+        else:
+            st.error("Dataset not found locally.")
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,25 @@
+"""
+Situational Crisis & Peace of Mind (PoM) Analyzer
+Version: 2.1.0 (Viva Edition)
+
+Identifies acute life stressors (financial, social, academic) and 
+provides immediate grounding and clinical validation.
+"""
+
 import re
 from datetime import datetime
 
 class SituationalAnalyzer:
     """
-    Holistic Crisis Analyst for Life Stressor Events.
-    Identifies situational crises and provides grounding, scoring, and resources.
+    Holistic analyzer for situational stressors.
+    Features:
+    - Emergency detect (e.g., immediate "fucked up" states).
+    - Stressor categorization (Financial, Social, Academic).
+    - Peace of Mind (PoM) scoring.
+    - Grounding techniques for acute distress.
     """
 
+    # Stressor categories and their patterns
     STRESSORS = {
         "Financial Crisis": {
             "markers": [
@@ -14,7 +27,7 @@ class SituationalAnalyzer:
                 r"\bbankrupt\b", r"\bbusiness loss\b", r"\blost everything\b",
                 r"\bfinancial trauma\b", r"\bstock market\b", r"\bcrypto\b"
             ],
-            "keywords": ["Trading Loss", "Financial Debt", "Business Failure", "Economic Stress"],
+            "keywords": ["Trading Loss", "Financial Debt", "Economic Stress"],
             "search_query": "How to recover mentally from a major business loss"
         },
         "Social & Trust Issues": {
@@ -23,16 +36,16 @@ class SituationalAnalyzer:
                 r"\btoxic relationship\b", r"\balone\b", r"\bisolated\b", r"\bno one to trust\b",
                 r"\bbroken trust\b", r"\bhate me\b"
             ],
-            "keywords": ["Broken Trust", "Social Isolation", "Relationship Betrayal", "Toxic Environment"],
+            "keywords": ["Broken Trust", "Social Isolation", "Betrayal"],
             "search_query": "How to rebuild trust after being let down"
         },
         "Performance Stress": {
             "markers": [
                 r"\bfailing\b", r"\bgrade\w*\b", r"\bcareer failure\b", r"\bcan't keep up\b",
-                r"\bdropped out\b", r"\bfucked up\b", r"\bf*cked up\b", r"\bmessed up\b",
+                r"\bdropped out\b", r"\bfucked up\b", r"\bf\*cked up\b", r"\bmessed up\b",
                 r"\bburnout\b", r"\bnot good enough\b"
             ],
-            "keywords": ["Academic Burnout", "Career Failure", "Performance Anxiety", "Self-Worth Issues"],
+            "keywords": ["Academic Burnout", "Career Pressure", "Self-Worth"],
             "search_query": "Managing academic burnout and self-worth"
         },
         "Existential/Severe": {
@@ -40,108 +53,109 @@ class SituationalAnalyzer:
                 r"\bdone with life\b", r"\btotal hopelessness\b", r"\bend it\b", 
                 r"\balive for what\b", r"\bno point\b", r"\beverything is heavy\b"
             ],
-            "keywords": ["Existential Crisis", "Total Hopelessness", "Life Fatigue", "Severe Distress"],
+            "keywords": ["Existential Crisis", "Hopelessness", "Life Fatigue"],
             "search_query": "Finding a path forward when everything feels heavy"
         }
     }
 
+    # Curated article links for the "Piece of Mind" toolbox
     ARTICLE_LIBRARY = {
         "Financial Crisis": {
-            "title": "Why your bank account isn't your identity",
+            "title": "Why your net worth isn't your self-worth",
             "url": "https://www.psychologytoday.com/us/blog/the-financial-mind/202104/separating-net-worth-self-worth",
-            "description": "Learn to cope with the psychology of trading losses and separate net worth from self-worth."
+            "description": "Coping strategies for significant financial losses."
         },
         "Social & Trust Issues": {
-            "title": "Setting Boundaries & Rebuilding Trust",
+            "title": "Rebuilding Trust & Setting Boundaries",
             "url": "https://www.helpguide.org/articles/relationships-communication/setting-healthy-boundaries.htm",
-            "description": "How to rebuild trust after being let down and identifying narcissistic patterns."
+            "description": "How to heal after social betrayal or abandonment."
         },
         "Performance Stress": {
-            "title": "Managing Burnout and Academic Pressure",
+            "title": "Academic Pressure & Your Mental Health",
             "url": "https://www.verywellmind.com/how-to-manage-academic-burnout-5211516",
-            "description": "Tools for managing academic burnout and maintaining self-worth during failures."
+            "description": "Dealing with the weight of student or career expectations."
         },
         "Existential/Severe": {
-            "title": "Finding a Path Forward",
+            "title": "When Life Feels Too Heavy",
             "url": "https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/hopelessness",
-            "description": "Resources for finding a path forward when everything feels heavy."
+            "description": "Resources for finding light in dark existential moments."
         }
     }
 
+    # Standard clinical grounding for panic or severe distress
     GROUNDING_TECHNIQUES = [
-        "**5-4-3-2-1 Technique:**",
-        "1. Identify 5 things you can see around you.",
-        "2. Identify 4 things you can touch.",
-        "3. Identify 3 things you can hear.",
-        "4. Identify 2 things you can smell.",
-        "5. Identify 1 thing you can taste.",
-        "Focus on your breath: Inhale for 4, Hold for 4, Exhale for 4."
+        "**Identify 5-4-3-2-1:**",
+        "1. Look at 5 objects near you.",
+        "2. Feel 4 textures (e.g., your desk, your shirt).",
+        "3. Listen for 3 distinct sounds.",
+        "4. Notice 2 smells.",
+        "5. Taste 1 thing (or sip water).",
+        "**Breathing:** Inhale for 4s, Hold for 4s, Exhale for 6s."
     ]
 
     def analyze(self, text):
+        """
+        Main situational analysis logic.
+        """
         if not text:
             return None
 
-        detected_stressors = []
-        is_fucked_up = False
-        
-        # Check for immediate grounding trigger
-        if re.search(r"\bf[u\*]{2}ked up (from|with|by) life\b", text, re.IGNORECASE) or \
-           re.search(r"\bdone with everything\b", text, re.IGNORECASE):
-            is_fucked_up = True
+        # 1. Emergency Detection (Keywords for acute crisis)
+        is_emergency = bool(re.search(r"\bf[u\*]{2}ked up (from|with|by) life\b", text, re.IGNORECASE)) or \
+                       bool(re.search(r"\bdone with everything\b", text, re.IGNORECASE))
 
-        total_stress_score = 0
+        # 2. Stressor Extraction
+        detected = []
+        cumulative_stress = 0
         
-        for name, data in self.STRESSORS.items():
-            matches = []
-            for pattern in data["markers"]:
-                if re.search(pattern, text, re.IGNORECASE):
-                    matches.append(pattern)
-            
+        for name, cfg in self.STRESSORS.items():
+            matches = [m for m in cfg["markers"] if re.search(m, text, re.IGNORECASE)]
             if matches:
-                # Calculate stress contribution
-                score = min(len(matches) * 25, 100)
-                total_stress_score += score
-                
-                detected_stressors.append({
+                weight = min(len(matches) * 25, 100)
+                cumulative_stress += weight
+                detected.append({
                     "theme": name,
-                    "score": score,
-                    "keywords": data["keywords"],
-                    "search_query": data["search_query"],
+                    "score": weight,
+                    "keywords": cfg["keywords"],
+                    "search_query": cfg["search_query"],
                     "article": self.ARTICLE_LIBRARY.get(name)
                 })
 
-        # Calculate Peace of Mind (POM) score
-        # 100 is calm, 0 is severe crisis
-        avg_stress = (total_stress_score / len(self.STRESSORS)) if detected_stressors else 0
+        # 3. PoM Scoring (Inverse of stress intensity)
+        avg_stress = (cumulative_stress / len(self.STRESSORS)) if detected else 0
         pom_score = max(100 - avg_stress, 0)
         
-        # If is_fucked_up is true, POM score is likely very low or needs immediate attention
-        if is_fucked_up and pom_score > 20:
-            pom_score = 20
+        # Override for emergency states
+        if is_emergency:
+            pom_score = min(pom_score, 15)
 
         return {
             "pom_score": round(pom_score),
-            "is_emergency": is_fucked_up,
-            "stressors": detected_stressors,
-            "grounding": self.GROUNDING_TECHNIQUES if is_fucked_up else None,
-            "validation": self._generate_validation(detected_stressors, is_fucked_up)
+            "is_emergency": is_emergency,
+            "stressors": detected,
+            "grounding": self.GROUNDING_TECHNIQUES if is_emergency else None,
+            "validation": self._generate_validation(detected, is_emergency)
         }
 
-    def _generate_validation(self, stressors, is_emergency):
-        if is_emergency:
-            return "I hear how much weight you're carrying right now. It sounds like things feel completely overwhelming."
+    def _generate_validation(self, stressors, emergency):
+        """Generates a clinically empathetic response."""
+        if emergency:
+            return "I hear how heavy this feels. It's completely understandable to feel overwhelmed by such intense weight."
         
         if not stressors:
-            return "Thank you for sharing. I'm here to listen to whatever life stressors you might be facing."
+            return "Thank you for sharing your thoughts. I'm here to support you through any situational stressors."
             
         primary = stressors[0]["theme"]
         if primary == "Financial Crisis":
-            return "I hear how much weight you're carrying with those financial challenges. Losing money or facing business stress is incredibly draining."
+            return "Losing money or facing debt can feel like losing your footing. It's a valid and heavy stressor."
         elif primary == "Social & Trust Issues":
-            return "It sounds like you've been let down by someone you trusted. Dealing with betrayal or isolation is deeply painful."
+            return "Being let down or feeling isolated hurts deeply. Your feelings around this trust are valid."
         elif primary == "Performance Stress":
-            return "Dealing with failure or pressure in your career/studies can make you feel stuck. It's a lot to handle."
+            return "Performance pressure is exhausting. Remember that your worth is not defined by a single failure or grade."
         else:
-            return "I hear how heavy things feel right now. It's understandable to feel this way when everything seems to be going wrong."
-# Dummy change to trigger redeploy
+            return "I recognize the complexity of what you're facing. You are handling a lot right now."
+
+if __name__ == "__main__":
+    # Internal Unit Test
+    situ = SituationalAnalyzer()
+    print(situ.analyze("I'm f**ked up from life. Everything is heavy."))
