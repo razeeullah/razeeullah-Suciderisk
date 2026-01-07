@@ -46,4 +46,6 @@ Thumbs.db
 *.log
 
 # Streamlit
-.streamlit/
+
+# Database
+*.db

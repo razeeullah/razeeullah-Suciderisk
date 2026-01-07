@@ -20,6 +20,9 @@ import json
 from diagnostic_engine import DiagnosticAssistant
 from situational_analyzer import SituationalAnalyzer
 
+# Define script directory for file paths
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
 # ---------------------------------------------------------
@@ -557,7 +560,12 @@ def main():
                 st.warning("Please enter context."); st.stop()
                 
             res = st.session_state.situational.analyze(situ_text)
-            st.success(res['validation'])
+            st.markdown(f"""
+            <div class="card" style="border-left: 5px solid #3B82F6; margin-bottom: 20px;">
+                <h4 style="color: #3B82F6; margin: 0;">Analytic Validation</h4>
+                <p style="font-size: 1.1rem;">{res['validation']}</p>
+            </div>
+            """, unsafe_allow_html=True)
             
             if res['is_emergency']:
                 st.markdown("""
@@ -568,6 +576,32 @@ def main():
                     </ul>
                 </div>
                 """, unsafe_allow_html=True)
+
+            # Display Stressors
+            if res['stressors']:
+                st.subheader("🔍 Identified Stress Factors")
+                for stressor in res['stressors']:
+                    article_html = ""
+                    if stressor.get('article'):
+                        a = stressor['article']
+                        article_html = f"""
+                        <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 8px;">
+                            <strong>Recommended Reading:</strong> <a href="{a['url']}" target="_blank">{a['title']}</a><br>
+                            <small>{a['description']}</small>
+                        </div>
+                        """
+                        
+                    st.markdown(f"""
+                    <div class="card" style="margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h4 style="margin: 0;">{stressor['theme']}</h4>
+                            <span style="background: #e0f2fe; color: #0284c7; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Impact: {stressor['score']}</span>
+                        </div>
+                        <p><strong>Keywords Detected:</strong> {', '.join(stressor['keywords'])}</p>
+                        <p><em>Suggested Search Strategy: "{stressor['search_query']}"</em></p>
+                        {article_html}
+                    </div>
+                    """, unsafe_allow_html=True)
             
             col_m1, col_m2 = st.columns(2)
             col_m1.metric("PoM Index", f"{res['pom_score']}/100")
